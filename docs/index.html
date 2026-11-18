@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#111317">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Blender Phone Bridge</title>
+<style>
+  :root {
+    --bg: #111317; --panel: rgba(22,24,29,.82); --line: rgba(255,255,255,.12);
+    --text: #f1f2f4; --muted: #9aa0aa; --accent: #ea7600; --rec: #e5484d; --ok: #3dd68c;
+    --safe-t: env(safe-area-inset-top, 0px); --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-l: env(safe-area-inset-left, 0px); --safe-r: env(safe-area-inset-right, 0px);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.4 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; overflow: hidden;
+    overscroll-behavior: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+  button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+  #app { position: fixed; inset: 0; }
+  #view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; background: #000; }
+
+  /* ---------- start screen ---------- */
+  #start { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    padding: calc(24px + var(--safe-t)) 16px calc(24px + var(--safe-b)); overflow-y: auto; touch-action: pan-y;
+    background: radial-gradient(120% 80% at 50% 0%, #2a1a08 0%, var(--bg) 60%); }
+  .card { width: 100%; max-width: 420px; }
+  .logo { width: 64px; height: 64px; border-radius: 18px; background: var(--accent); display: grid;
+    place-items: center; margin-bottom: 16px; box-shadow: 0 10px 40px rgba(234,118,0,.35); }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -.02em; }
+  .sub { color: var(--muted); margin: 0 0 22px; }
+  .btn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 15px 18px;
+    border-radius: 14px; background: var(--accent); color: #fff; font-weight: 600; font-size: 16px;
+    margin-top: 10px; text-decoration: none; }
+  .btn.alt { background: #252931; }
+  .btn:disabled { opacity: .45; }
+  .field { display: block; margin-top: 12px; }
+  .field span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+  .field input { width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line);
+    background: #1a1d23; color: var(--text); font: inherit; user-select: text; -webkit-user-select: text; }
+  .note { margin-top: 18px; padding: 14px; border-radius: 14px; background: #1a1d23; border: 1px solid var(--line);
+    color: var(--muted); font-size: 13.5px; }
+  .note b { color: var(--text); }
+  .note.warn { border-color: rgba(234,118,0,.5); }
+  .hidden { display: none !important; }
+  .status-line { display: flex; align-items: center; gap: 8px; margin-top: 14px; color: var(--muted); font-size: 14px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #666; flex: none; }
+  .dot.ok { background: var(--ok); } .dot.busy { background: var(--accent); animation: pulse 1s infinite; }
+  .dot.err { background: var(--rec); }
+  @keyframes pulse { 50% { opacity: .3; } }
+
+  /* ---------- HUD ---------- */
+  #hud { position: absolute; inset: 0; pointer-events: none; }
+  #hud > * { pointer-events: auto; }
+  .top { position: absolute; top: calc(10px + var(--safe-t)); left: calc(10px + var(--safe-l)); right: calc(10px + var(--safe-r));
+    display: flex; gap: 8px; align-items: center; pointer-events: none; }
+  .top > * { pointer-events: auto; }
+  .pill { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px;
+    background: var(--panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--line); font-size: 13px; white-space: nowrap; }
+  .spacer { flex: 1; }
+  .icon-btn { width: 42px; height: 42px; border-radius: 50%; background: var(--panel); border: 1px solid var(--line);
+    display: grid; place-items: center; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+  .icon-btn svg { width: 20px; height: 20px; }
+  #recBadge { background: var(--rec); border-color: transparent; font-weight: 600; }
+
+  .side { position: absolute; right: calc(14px + var(--safe-r)); top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 14px; align-items: center; }
+  .shutter { width: 70px; height: 70px; border-radius: 50%; border: 4px solid #fff; background: rgba(255,255,255,.2);
+    display: grid; place-items: center; }
+  .shutter i { width: 54px; height: 54px; border-radius: 50%; background: #fff; transition: transform .1s; }
+  .shutter:active i { transform: scale(.88); }
+  .shutter.video i { background: var(--rec); }
+  .shutter.video.on i { border-radius: 10px; width: 30px; height: 30px; }
+
+  .joy { position: absolute; left: calc(22px + var(--safe-l)); bottom: calc(22px + var(--safe-b));
+    width: 136px; height: 136px; border-radius: 50%; background: rgba(20,22,27,.45); border: 1px solid var(--line);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); touch-action: none; }
+  .joy .knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px;
+    border-radius: 50%; background: rgba(255,255,255,.85); box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+  .lift { position: absolute; right: calc(22px + var(--safe-r)); bottom: calc(22px + var(--safe-b)); width: 54px; height: 150px;
+    border-radius: 27px; background: rgba(20,22,27,.45); border: 1px solid var(--line); touch-action: none;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .lift .knob { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px;
+    border-radius: 50%; background: rgba(255,255,255,.85); }
+  .lift small { position: absolute; left: 0; right: 0; text-align: center; font-size: 11px; color: var(--muted); }
+  .lift small.u { top: 6px; } .lift small.d { bottom: 6px; }
+
+  .toast { position: absolute; left: 50%; bottom: calc(180px + var(--safe-b)); transform: translateX(-50%);
+    padding: 10px 16px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); font-size: 14px;
+    max-width: calc(100% - 32px); text-align: center; transition: opacity .3s; pointer-events: none; }
+  .thumb { position: absolute; left: calc(14px + var(--safe-l)); top: calc(64px + var(--safe-t)); width: 86px; border-radius: 12px;
+    overflow: hidden; border: 2px solid #fff; box-shadow: 0 6px 20px rgba(0,0,0,.5); background: #000; }
+  .thumb img { display: block; width: 100%; }
+
+  /* ---------- sheet ---------- */
+  #sheet { position: absolute; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: flex-end; justify-content: center; }
+  #sheet .inner { width: 100%; max-width: 520px; max-height: 85%; overflow-y: auto; touch-action: pan-y;
+    background: #181b21; border-radius: 20px 20px 0 0; padding: 18px 18px calc(18px + var(--safe-b)); border-top: 1px solid var(--line); }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .row label { flex: 1; }
+  .row output { color: var(--muted); min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+  .row input[type=range] { width: 46%; accent-color: var(--accent); }
+  .row select { background: #252931; color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 8px; font: inherit; }
+  .seg { display: flex; background: #252931; border-radius: 10px; padding: 3px; }
+  .seg button { padding: 7px 12px; border-radius: 8px; background: transparent; font-size: 14px; }
+  .seg button.on { background: var(--accent); }
+  .sheet-title { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+  .small { color: var(--muted); font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="view"></canvas>
+
+  <!-- ===================== START ===================== -->
+  <section id="start">
+    <div class="card">
+      <div class="logo">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="3"/><circle cx="12" cy="17" r="1.2" fill="#fff"/><path d="M9 7.5l3-2 3 2v3.5l-3 2-3-2z"/></svg>
+      </div>
+      <h1>Phone Bridge</h1>
+      <p class="sub">Dein Handy als Kamera für Blender – schau dich in der Szene um, lauf herum, mach Fotos und Videos.</p>
+
+      <div id="manual" class="hidden">
+        <label class="field"><span>Blender-Adresse (IP:Port)</span><input id="hostIn" inputmode="url" placeholder="192.168.0.20:8765" autocomplete="off"></label>
+        <label class="field"><span>Token (steht im Link in Blender)</span><input id="tokenIn" autocomplete="off"></label>
+        <p class="small" style="margin-top:8px">Am einfachsten: In Blender auf „Handy verbinden“ klicken und den QR-Code scannen.</p>
+      </div>
+
+      <button id="btnStart" class="btn">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        Verbinden (Gyrosensor)
+      </button>
+      <button id="btnStartAR" class="btn alt hidden">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l9 5v10l-9 5-9-5V7z"/><path d="M12 22V12M21 7l-9 5-9-5"/></svg>
+        Verbinden mit AR-Tracking (6DoF)
+      </button>
+
+      <div class="status-line"><span id="stDot" class="dot"></span><span id="stText">Bereit</span></div>
+
+      <div id="certHelp" class="note warn hidden">
+        <b>Verbindung blockiert?</b><br>
+        Blender nutzt ein selbst erstelltes Sicherheitszertifikat. Öffne einmal den folgenden Link, tippe auf
+        <i>„Erweitert“ → „Trotzdem fortfahren“</i> (bzw. auf iPhone <i>„Details einblenden“ → „diese Website besuchen“</i>) und komm zurück.
+        <a id="certLink" class="btn" href="#">Zertifikat akzeptieren</a>
+        <a id="localLink" class="btn alt" href="#">App direkt von Blender laden</a>
+        <div style="margin-top:10px">Handy und Computer müssen im selben WLAN sein. Fragt der Browser nach Zugriff auf „Geräte im lokalen Netzwerk“, erlaube ihn.</div>
+      </div>
+
+      <div class="note">
+        <b>Steuerung:</b> Handy bewegen = umschauen · Joystick links = laufen · Regler rechts = hoch/runter ·
+        Wischen = drehen · Zwei Finger = Zoom (Brennweite).<br>
+        <b>AR-Tracking</b> nutzt die Kamera für echte Positionsverfolgung (Android&nbsp;+&nbsp;Chrome mit ARCore).
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== HUD ===================== -->
+  <section id="hud" class="hidden">
+    <div class="top">
+      <div class="pill"><span id="hudDot" class="dot ok"></span><span id="hudMode">Gyro</span><span id="hudFps" class="small"></span></div>
+      <div id="recBadge" class="pill hidden">● REC <span id="recTime">0:00</span></div>
+      <div class="spacer"></div>
+      <button class="icon-btn" id="btnRecenter" title="Ausrichtung zurücksetzen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+      </button>
+      <button class="icon-btn" id="btnSettings" title="Einstellungen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+      </button>
+      <button class="icon-btn" id="btnExit" title="Beenden">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="side">
+      <button class="shutter" id="btnPhoto" title="Foto"><i></i></button>
+      <button class="shutter video" id="btnVideo" title="Video"><i></i></button>
+    </div>
+
+    <div class="joy" id="joy"><div class="knob"></div></div>
+    <div class="lift" id="lift"><small class="u">▲</small><div class="knob"></div><small class="d">▼</small></div>
+
+    <a id="thumb" class="thumb hidden" target="_blank"><img alt="Letztes Foto"></a>
+    <div id="toast" class="toast" style="opacity:0"></div>
+  </section>
+
+  <!-- ===================== SETTINGS ===================== -->
+  <section id="sheet" class="hidden">
+    <div class="inner">
+      <div class="sheet-title">Einstellungen</div>
+      <div class="small" id="sheetInfo"></div>
+      <div class="row"><label>Bildqualität</label><input type="range" id="setQuality" min="20" max="95" step="5"><output id="outQuality"></output></div>
+      <div class="row"><label>Auflösung</label><input type="range" id="setSize" min="320" max="1600" step="80"><output id="outSize"></output></div>
+      <div class="row"><label>Max. FPS</label><input type="range" id="setFps" min="5" max="60" step="5"><output id="outFps"></output></div>
+      <div class="row"><label>Laufgeschwindigkeit</label><input type="range" id="setSpeed" min="0.2" max="20" step="0.2"><output id="outSpeed"></output></div>
+      <div class="row"><label>Brennweite</label><input type="range" id="setLens" min="10" max="120" step="1"><output id="outLens"></output></div>
+      <div class="row"><label>Foto-Modus</label>
+        <div class="seg" id="segPhoto"><button data-v="VIEWPORT">Viewport</button><button data-v="RENDER">Render</button></div></div>
+      <div class="row" id="rowPassthrough"><label>Echte Kamera durchscheinen (AR)</label><input type="range" id="setPass" min="0" max="90" step="5"><output id="outPass"></output></div>
+      <div class="row"><label>Video auch auf dem Handy speichern</label><input type="checkbox" id="setPhoneVideo" checked style="width:22px;height:22px;accent-color:var(--accent)"></div>
+      <button class="btn" id="btnCloseSheet">Fertig</button>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+"use strict";
+const $ = (id) => document.getElementById(id);
+const MSG_FRAME = 1, MSG_PHOTO = 2;
+
+// ---------------------------------------------------------------- params
+const params = new URLSearchParams(location.search);
+let host = params.get("host") || "";
+let token = params.get("token") || "";
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+if (!host) { host = store.get("pb_host") || ""; token = store.get("pb_token") || ""; $("manual").classList.remove("hidden"); }
+$("hostIn").value = host; $("tokenIn").value = token;
+
+// ---------------------------------------------------------------- state
+const S = {
+  ws: null, open: false, everOpen: false, mode: "gyro", lens: 26, reconnectTimer: 0,
+  q: null, p: null, lastSent: 0, move: [0, 0, 0], moveDirty: false,
+  frames: 0, fpsT: performance.now(), recording: false, recT0: 0, mediaRec: null, chunks: [],
+  xrSession: null, xrRef: null, quitting: false, settings: {}, photoMode: "VIEWPORT",
+};
+
+function setStatus(text, cls) {
+  $("stText").textContent = text;
+  $("stDot").className = "dot " + (cls || "");
+}
+let toastTimer = 0;
+function toast(msg, ms = 2200) {
+  const t = $("toast"); t.textContent = msg; t.style.opacity = 1;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.style.opacity = 0), ms);
+}
+function haptic(ms = 12) { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} }
+
+// ---------------------------------------------------------------- canvas
+const canvas = $("view");
+const ctx = canvas.getContext("2d", { alpha: true });
+function resizeCanvas() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(innerWidth * dpr);
+  canvas.height = Math.round(innerHeight * dpr);
+  send({ t: "view", w: canvas.width, h: canvas.height });
+}
+addEventListener("resize", () => setTimeout(resizeCanvas, 50));
+let lastBitmap = null;
+function drawBitmap(bmp) {
+  const cw = canvas.width, ch = canvas.height;
+  const s = Math.max(cw / bmp.width, ch / bmp.height);
+  const w = bmp.width * s, h = bmp.height * s;
+  ctx.clearRect(0, 0, cw, ch);
+  ctx.drawImage(bmp, (cw - w) / 2, (ch - h) / 2, w, h);
+}
+
+// ---------------------------------------------------------------- websocket
+function send(obj) {
+  if (S.ws && S.open) { try { S.ws.send(JSON.stringify(obj)); } catch (e) {} }
+}
+
+function connect() {
+  clearTimeout(S.reconnectTimer);
+  if (S.ws) { try { S.ws.close(); } catch (e) {} }
+  setStatus("Verbinde mit Blender …", "busy");
+  let ws;
+  try { ws = new WebSocket(`wss://${host}/ws?token=${encodeURIComponent(token)}`); }
+  catch (e) { onConnectFail(); return; }
+  ws.binaryType = "arraybuffer";
+  S.ws = ws;
+  ws.onopen = () => {
+    S.open = true; S.everOpen = true;
+    $("certHelp").classList.add("hidden");
+    setStatus("Verbunden", "ok");
+    $("hudDot").className = "dot ok";
+    send({ t: "hello", w: canvas.width, h: canvas.height, mode: S.mode, ua: navigator.userAgent });
+    showHud();
+  };
+  ws.onmessage = (ev) => (typeof ev.data === "string" ? onJson(JSON.parse(ev.data)) : onBinary(ev.data));
+  ws.onclose = () => {
+    const was = S.open; S.open = false;
+    if (S.quitting) return;
+    if (!was && !S.everOpen) { onConnectFail(); return; }
+    $("hudDot").className = "dot err";
+    toast("Verbindung verloren – verbinde neu …");
+    S.reconnectTimer = setTimeout(connect, 1500);
+  };
+}
+
+function onConnectFail() {
+  setStatus("Keine Verbindung zu Blender", "err");
+  showStart();
+  const back = location.href;
+  $("certLink").href = `https://${host}/accept?return=${encodeURIComponent(back)}`;
+  $("localLink").href = `https://${host}/?host=${encodeURIComponent(host)}&token=${encodeURIComponent(token)}`;
+  $("certHelp").classList.toggle("hidden", location.host === host);
+}
+
+function onJson(m) {
+  switch (m.t) {
+    case "welcome":
+      S.lens = m.lens; S.settings = m; S.photoMode = m.photo || "VIEWPORT";
+      toast(`Verbunden mit „${m.scene}“ · Kamera ${m.camera}`);
+      syncSettingsUI();
+      break;
+    case "status": toast(m.msg, 3000); break;
+    case "photo": toast("Foto gespeichert: " + m.name, 2500); break;
+    case "rec": if (!m.on && m.frames != null) toast(`In Blender: ${m.frames} Frames aufgezeichnet`, 3000); break;
+  }
+}
+
+async function onBinary(buf) {
+  const u8 = new Uint8Array(buf);
+  const kind = u8[0];
+  const data = u8.subarray(1);
+  if (kind === MSG_FRAME) {
+    try {
+      const bmp = await createImageBitmap(new Blob([data], { type: "image/jpeg" }));
+      if (lastBitmap && lastBitmap.close) lastBitmap.close();
+      lastBitmap = bmp;
+      drawBitmap(bmp);
+      S.frames++;
+    } catch (e) {}
+    send({ t: "ack" });
+  } else if (kind === MSG_PHOTO) {
+    const isPng = data[0] === 0x89;
+    const blob = new Blob([data], { type: isPng ? "image/png" : "image/jpeg" });
+    showPhoto(blob, isPng ? "png" : "jpg");
+  }
+}
+
+function fileName(prefix, ext) {
+  const d = new Date(), p = (n) => String(n).padStart(2, "0");
+  return `${prefix}_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.${ext}`;
+}
+
+function showPhoto(blob, ext) {
+  const url = URL.createObjectURL(blob);
+  const a = $("thumb");
+  a.querySelector("img").src = url;
+  a.href = url;
+  a.download = fileName("blender_foto", ext);
+  a.classList.remove("hidden");
+  a.onclick = (e) => { e.preventDefault(); saveBlob(blob, a.download); };
+}
+
+async function saveBlob(blob, name) {
+  const file = new File([blob], name, { type: blob.type });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === "AbortError") return; }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+// ---------------------------------------------------------------- orientation (gyro)
+const D2R = Math.PI / 180;
+function qMul(a, b) { // [w,x,y,z]
+  return [
+    a[0]*b[0] - a[1]*b[1] - a[2]*b[2] - a[3]*b[3],
+    a[0]*b[1] + a[1]*b[0] + a[2]*b[3] - a[3]*b[2],
+    a[0]*b[2] - a[1]*b[3] + a[2]*b[0] + a[3]*b[1],
+    a[0]*b[3] + a[1]*b[2] - a[2]*b[1] + a[3]*b[0],
+  ];
+}
+const qAxis = (x, y, z, ang) => { const s = Math.sin(ang / 2); return [Math.cos(ang / 2), x * s, y * s, z * s]; };
+function screenAngle() {
+  if (screen.orientation && typeof screen.orientation.angle === "number") return screen.orientation.angle;
+  return typeof window.orientation === "number" ? window.orientation : 0;
+}
+function onOrientation(e) {
+  if (S.mode !== "gyro" || e.alpha == null) return;
+  // W3C: R = Rz(alpha) * Rx(beta) * Ry(gamma); device frame == Blender camera frame
+  // (x right, y up, z out of the screen -> camera looks along -z out of the back).
+  let q = qMul(qMul(qAxis(0, 0, 1, e.alpha * D2R), qAxis(1, 0, 0, e.beta * D2R)), qAxis(0, 1, 0, e.gamma * D2R));
+  q = qMul(q, qAxis(0, 0, 1, -screenAngle() * D2R));
+  S.q = q; S.p = null;
+}
+
+async function requestMotionPermission() {
+  const DOE = window.DeviceOrientationEvent;
+  if (DOE && typeof DOE.requestPermission === "function") {
+    const r = await DOE.requestPermission();
+    if (r !== "granted") throw new Error("Bewegungssensoren nicht erlaubt");
+  }
+}
+
+// ---------------------------------------------------------------- WebXR (6DoF)
+const Q_XR_TO_BLENDER = qAxis(1, 0, 0, Math.PI / 2); // XR: y-up, Blender: z-up
+async function startXR() {
+  const glCanvas = document.createElement("canvas");
+  const gl = glCanvas.getContext("webgl", { xrCompatible: true, alpha: true });
+  const session = await navigator.xr.requestSession("immersive-ar", {
+    requiredFeatures: ["local"], optionalFeatures: ["dom-overlay"], domOverlay: { root: $("app") },
+  });
+  S.xrSession = session;
+  await gl.makeXRCompatible();
+  session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+  S.xrRef = await session.requestReferenceSpace("local");
+  if (!session.domOverlayState) toast("Hinweis: DOM-Overlay nicht verfügbar – Bild evtl. nicht sichtbar", 4000);
+  document.body.style.background = "transparent";
+  canvas.style.background = "transparent";
+  applyPassthrough();
+  session.addEventListener("end", () => {
+    S.xrSession = null; S.mode = "gyro"; canvas.style.background = "#000"; canvas.style.opacity = 1;
+    $("hudMode").textContent = "Gyro";
+    send({ t: "hello", w: canvas.width, h: canvas.height, mode: "gyro" });
+    if (!S.quitting) toast("AR beendet – weiter mit Gyrosensor");
+  });
+  const onFrame = (time, frame) => {
+    if (!S.xrSession) return;
+    session.requestAnimationFrame(onFrame);
+    const layer = session.renderState.baseLayer;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    const pose = frame.getViewerPose(S.xrRef);
+    if (!pose) return;
+    const t = pose.transform, o = t.orientation, p = t.position;
+    S.q = qMul(Q_XR_TO_BLENDER, [o.w, o.x, o.y, o.z]);
+    S.p = [p.x, -p.z, p.y];
+    pumpPose(true);
+  };
+  session.requestAnimationFrame(onFrame);
+}
+function applyPassthrough() {
+  const v = Number($("setPass").value || 0);
+  canvas.style.opacity = S.xrSession ? String(1 - v / 100) : "1";
+}
+
+// ---------------------------------------------------------------- pose pump
+function pumpPose(force) {
+  const now = performance.now();
+  if (S.q && (force || now - S.lastSent > 14)) {
+    S.lastSent = now;
+    send({ t: "pose", q: S.q.map((v) => +v.toFixed(5)), p: S.p ? S.p.map((v) => +v.toFixed(4)) : null, mode: S.mode });
+  }
+  if (S.moveDirty) { S.moveDirty = false; send({ t: "move", v: S.move }); }
+}
+function loop() {
+  if (!S.xrSession) pumpPose(false);
+  const now = performance.now();
+  if (now - S.fpsT > 1000) {
+    $("hudFps").textContent = S.open ? `${Math.round(S.frames * 1000 / (now - S.fpsT))} fps` : "";
+    S.frames = 0; S.fpsT = now;
+  }
+  if (S.recording) {
+    const s = Math.floor((Date.now() - S.recT0) / 1000);
+    $("recTime").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }
+  requestAnimationFrame(loop);
+}
+
+// ---------------------------------------------------------------- controls
+function stick(el, onChange, axes) {
+  const knob = el.querySelector(".knob");
+  let id = null;
+  const set = (x, y) => {
+    knob.style.transform = `translate(${x * (el.clientWidth / 2 - 24)}px, ${y * (el.clientHeight / 2 - 24)}px)`;
+    onChange(x, y);
+  };
+  const upd = (e) => {
+    const r = el.getBoundingClientRect();
+    let x = axes.x ? ((e.clientX - r.left) / r.width) * 2 - 1 : 0;
+    let y = axes.y ? ((e.clientY - r.top) / r.height) * 2 - 1 : 0;
+    const len = Math.hypot(x, y); if (len > 1) { x /= len; y /= len; }
+    set(x, y);
+  };
+  el.addEventListener("pointerdown", (e) => { id = e.pointerId; el.setPointerCapture(id); upd(e); haptic(8); });
+  el.addEventListener("pointermove", (e) => { if (e.pointerId === id) upd(e); });
+  const end = (e) => { if (e.pointerId === id) { id = null; set(0, 0); } };
+  el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
+}
+const curve = (v) => Math.sign(v) * v * v;
+stick($("joy"), (x, y) => { S.move[0] = +curve(x).toFixed(3); S.move[1] = +curve(-y).toFixed(3); S.moveDirty = true; }, { x: 1, y: 1 });
+stick($("lift"), (_x, y) => { S.move[2] = +curve(-y).toFixed(3); S.moveDirty = true; }, { x: 0, y: 1 });
+
+// swipe = yaw, pinch = lens
+const ptrs = new Map();
+let pinchStart = 0, lensStart = 26;
+canvas.addEventListener("pointerdown", (e) => {
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinchStart = Math.hypot(a.x - b.x, a.y - b.y); lensStart = S.lens; }
+});
+canvas.addEventListener("pointermove", (e) => {
+  const prev = ptrs.get(e.pointerId); if (!prev) return;
+  if (ptrs.size === 1) {
+    const dx = e.clientX - prev.x;
+    if (Math.abs(dx) > 0) send({ t: "yaw", d: +(dx / innerWidth * Math.PI).toFixed(4) });
+  }
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (ptrs.size === 2 && pinchStart > 0) {
+    const [a, b] = [...ptrs.values()];
+    const lens = Math.max(8, Math.min(200, lensStart * Math.hypot(a.x - b.x, a.y - b.y) / pinchStart));
+    if (Math.abs(lens - S.lens) > 0.3) { S.lens = lens; send({ t: "lens", mm: +lens.toFixed(1) }); }
+  }
+});
+const ptrEnd = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinchStart = 0; };
+canvas.addEventListener("pointerup", ptrEnd); canvas.addEventListener("pointercancel", ptrEnd);
+
+$("btnRecenter").onclick = () => { send({ t: "recenter" }); haptic(20); toast("Ausrichtung zurückgesetzt"); };
+$("btnPhoto").onclick = () => {
+  send({ t: "photo", mode: S.photoMode }); haptic(30);
+  canvas.style.filter = "brightness(2.2)"; setTimeout(() => (canvas.style.filter = ""), 90);
+};
+$("btnVideo").onclick = () => (S.recording ? stopRecording() : startRecording());
+
+// ---------------------------------------------------------------- video recording
+function pickMime() {
+  const types = ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+  return types.find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || "";
+}
+function startRecording() {
+  S.recording = true; S.recT0 = Date.now();
+  $("btnVideo").classList.add("on"); $("recBadge").classList.remove("hidden");
+  send({ t: "rec", on: true }); haptic(40);
+  if ($("setPhoneVideo").checked && window.MediaRecorder && canvas.captureStream) {
+    try {
+      const mime = pickMime();
+      S.chunks = [];
+      S.mediaRec = new MediaRecorder(canvas.captureStream(30), mime ? { mimeType: mime, videoBitsPerSecond: 8e6 } : undefined);
+      S.mediaRec.ondataavailable = (e) => e.data && e.data.size && S.chunks.push(e.data);
+      S.mediaRec.onstop = () => {
+        const type = S.mediaRec.mimeType || mime || "video/webm";
+        const blob = new Blob(S.chunks, { type });
+        const name = fileName("blender_video", type.includes("mp4") ? "mp4" : "webm");
+        toast("Video fertig – tippe zum Speichern", 4000);
+        showVideoSave(blob, name);
+      };
+      S.mediaRec.start(500);
+    } catch (e) { S.mediaRec = null; toast("Video auf dem Handy nicht möglich: " + e.message); }
+  }
+}
+function stopRecording() {
+  S.recording = false;
+  $("btnVideo").classList.remove("on"); $("recBadge").classList.add("hidden");
+  send({ t: "rec", on: false }); haptic(40);
+  if (S.mediaRec && S.mediaRec.state !== "inactive") S.mediaRec.stop();
+}
+function showVideoSave(blob, name) {
+  const a = $("thumb");
+  a.classList.remove("hidden");
+  const img = a.querySelector("img");
+  try { img.src = canvas.toDataURL("image/jpeg", 0.6); } catch (e) {}
+  a.onclick = (e) => { e.preventDefault(); saveBlob(blob, name); };
+}
+
+// ---------------------------------------------------------------- settings sheet
+const fields = [
+  ["setQuality", "outQuality", "quality", (v) => v + " %"],
+  ["setSize", "outSize", "size", (v) => v + " px"],
+  ["setFps", "outFps", "fps", (v) => v],
+  ["setSpeed", "outSpeed", "speed", (v) => (+v).toFixed(1) + " m/s"],
+];
+function syncSettingsUI() {
+  const m = S.settings;
+  if (m.quality) $("setQuality").value = m.quality;
+  if (m.size) $("setSize").value = m.size;
+  if (m.fps) $("setFps").value = m.fps;
+  if (m.speed) $("setSpeed").value = m.speed;
+  $("setLens").value = Math.round(S.lens);
+  for (const [i, o, , f] of fields) $(o).textContent = f($(i).value);
+  $("outLens").textContent = Math.round(S.lens) + " mm";
+  $("outPass").textContent = $("setPass").value + " %";
+  document.querySelectorAll("#segPhoto button").forEach((b) => b.classList.toggle("on", b.dataset.v === S.photoMode));
+  $("rowPassthrough").classList.toggle("hidden", !S.xrSession);
+  $("sheetInfo").textContent = m.scene ? `Szene „${m.scene}“ · Blender ${m.blender || ""} · ${host}` : host;
+}
+for (const [i, o, key, f] of fields) {
+  $(i).addEventListener("input", () => { $(o).textContent = f($(i).value); });
+  $(i).addEventListener("change", () => { S.settings[key] = +$(i).value; send({ t: "settings", [key]: +$(i).value }); });
+}
+$("setLens").addEventListener("input", () => {
+  S.lens = +$("setLens").value; $("outLens").textContent = S.lens + " mm"; send({ t: "lens", mm: S.lens });
+});
+$("setPass").value = 0;
+$("setPass").addEventListener("input", () => { $("outPass").textContent = $("setPass").value + " %"; applyPassthrough(); });
+document.querySelectorAll("#segPhoto button").forEach((b) => b.addEventListener("click", () => {
+  S.photoMode = b.dataset.v; send({ t: "settings", photo: S.photoMode }); syncSettingsUI();
+}));
+$("btnSettings").onclick = () => { syncSettingsUI(); $("sheet").classList.remove("hidden"); };
+$("btnCloseSheet").onclick = () => $("sheet").classList.add("hidden");
+$("sheet").addEventListener("click", (e) => { if (e.target === $("sheet")) $("sheet").classList.add("hidden"); });
+
+// ---------------------------------------------------------------- screens
+let wakeLock = null;
+async function keepAwake() { try { wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {} }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.open) keepAwake(); });
+function showHud() { $("start").classList.add("hidden"); $("hud").classList.remove("hidden"); $("hudMode").textContent = S.mode === "xr" ? "AR 6DoF" : "Gyro"; }
+function showStart() { $("hud").classList.add("hidden"); $("start").classList.remove("hidden"); }
+
+$("btnExit").onclick = () => {
+  S.quitting = true;
+  if (S.recording) stopRecording();
+  if (S.xrSession) S.xrSession.end();
+  if (S.ws) S.ws.close();
+  S.open = false;
+  setStatus("Getrennt", "");
+  showStart();
+  setTimeout(() => (S.quitting = false), 300);
+};
+
+async function begin(useXR) {
+  if (!$("manual").classList.contains("hidden")) {
+    host = $("hostIn").value.trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    token = $("tokenIn").value.trim();
+  }
+  if (!host || !token) { setStatus("Bitte Adresse und Token eingeben", "err"); return; }
+  store.set("pb_host", host); store.set("pb_token", token);
+  try {
+    if (useXR) { S.mode = "xr"; await startXR(); }
+    else { await requestMotionPermission(); S.mode = "gyro"; }
+  } catch (e) {
+    setStatus((useXR ? "AR konnte nicht starten: " : "") + e.message, "err");
+    S.mode = "gyro";
+    if (useXR) return;
+  }
+  if (!useXR) {
+    try { if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen(); } catch (e) {}
+  }
+  keepAwake();
+  resizeCanvas();
+  if (S.open) { send({ t: "hello", w: canvas.width, h: canvas.height, mode: S.mode }); showHud(); }
+  else connect();
+}
+addEventListener("deviceorientation", onOrientation);
+$("btnStart").onclick = () => begin(false);
+$("btnStartAR").onclick = () => begin(true);
+
+if (navigator.xr && navigator.xr.isSessionSupported) {
+  navigator.xr.isSessionSupported("immersive-ar").then((ok) => { if (ok) $("btnStartAR").classList.remove("hidden"); }).catch(() => {});
+}
+if (!window.isSecureContext) setStatus("Seite muss über HTTPS geöffnet werden (Sensoren benötigen HTTPS)", "err");
+else if (host) setStatus(`Bereit · Blender unter ${host}`, "");
+
+resizeCanvas();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+schema_version = "1.0.0"
+
+id = "phone_bridge"
+version = "1.0.0"
+name = "Phone Bridge"
+tagline = "Handy als virtuelle Kamera mit Gyro, AR-Tracking und Live-Stream"
+maintainer = "schwaflo"
+type = "add-on"
+website = "https://github.com/schwaflo/blender-phone-bridge"
+tags = ["3D View", "Camera", "Animation"]
+
+blender_version_min = "4.2.0"
+license = ["SPDX:MIT"]
+
+[permissions]
+network = "Lokaler Server für die Verbindung mit dem Handy im WLAN"
+files = "Speichert Fotos, Videobilder und ein TLS-Zertifikat"
