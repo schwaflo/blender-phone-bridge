@@ -21,6 +21,16 @@
   button { font: inherit; color: inherit; border: 0; cursor: pointer; }
   #app { position: fixed; inset: 0; }
   #view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; background: #000; }
+  #camVideo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+  .hint { position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%); width: min(320px, calc(100% - 48px));
+    padding: 16px 18px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); text-align: center;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); pointer-events: none; font-size: 14.5px; }
+  .hint b { display: block; font-size: 16px; margin-bottom: 4px; }
+  .hint .bar { height: 4px; border-radius: 2px; background: rgba(255,255,255,.12); margin-top: 12px; overflow: hidden; }
+  .hint .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .dot.warn { background: #f5a524; }
+  .footer { margin-top: 18px; text-align: center; font-size: 13px; }
+  .footer a { color: var(--muted); }
 
   /* ---------- start screen ---------- */
   #start { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -113,6 +123,7 @@
 </head>
 <body>
 <div id="app">
+  <video id="camVideo" class="hidden" playsinline muted autoplay></video>
   <canvas id="view"></canvas>
 
   <!-- ===================== START ===================== -->
@@ -130,13 +141,17 @@
         <p class="small" style="margin-top:8px">Am einfachsten: In Blender auf „Handy verbinden“ klicken und den QR-Code scannen.</p>
       </div>
 
-      <button id="btnStart" class="btn">
+      <button id="btnStart" class="btn alt">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-        Verbinden (Gyrosensor)
+        Nur Gyrosensor (umschauen)
+      </button>
+      <button id="btnStartCam" class="btn">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8a2 2 0 0 1 2-2h2l2-2h6l2 2h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/></svg>
+        Kamera-Tracking (herumlaufen)
       </button>
       <button id="btnStartAR" class="btn alt hidden">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l9 5v10l-9 5-9-5V7z"/><path d="M12 22V12M21 7l-9 5-9-5"/></svg>
-        Verbinden mit AR-Tracking (6DoF)
+        AR-Tracking mit ARCore (Android)
       </button>
 
       <div class="status-line"><span id="stDot" class="dot"></span><span id="stText">Bereit</span></div>
@@ -153,8 +168,12 @@
       <div class="note">
         <b>Steuerung:</b> Handy bewegen = umschauen · Joystick links = laufen · Regler rechts = hoch/runter ·
         Wischen = drehen · Zwei Finger = Zoom (Brennweite).<br>
-        <b>AR-Tracking</b> nutzt die Kamera für echte Positionsverfolgung (Android&nbsp;+&nbsp;Chrome mit ARCore).
+        <b>Kamera-Tracking</b> verfolgt über die Handykamera, wie du dich im Raum bewegst. Geh herum, und du gehst
+        durch die Blender-Welt. Funktioniert auf iPhone und Android. Auf Android mit ARCore gibt es zusätzlich das noch
+        genauere <b>AR-Tracking</b>.
       </div>
+      <div class="footer"><a href="blender_phone_bridge.zip" download>Blender-Addon herunterladen (.zip)</a> ·
+        <a href="https://github.com/schwaflo/blender-phone-bridge">GitHub</a></div>
     </div>
   </section>
 
@@ -162,6 +181,7 @@
   <section id="hud" class="hidden">
     <div class="top">
       <div class="pill"><span id="hudDot" class="dot ok"></span><span id="hudMode">Gyro</span><span id="hudFps" class="small"></span></div>
+      <div id="trkPill" class="pill hidden"><span id="trkDot" class="dot busy"></span><span id="trkText">Tracking</span></div>
       <div id="recBadge" class="pill hidden">● REC <span id="recTime">0:00</span></div>
       <div class="spacer"></div>
       <button class="icon-btn" id="btnRecenter" title="Ausrichtung zurücksetzen">
@@ -183,6 +203,8 @@
     <div class="joy" id="joy"><div class="knob"></div></div>
     <div class="lift" id="lift"><small class="u">▲</small><div class="knob"></div><small class="d">▼</small></div>
 
+    <div id="trkHint" class="hint hidden"><b id="trkHintTitle">Tracking startet …</b><span id="trkHintText"></span>
+      <div class="bar"><i id="trkHintBar"></i></div></div>
     <a id="thumb" class="thumb hidden" target="_blank"><img alt="Letztes Foto"></a>
     <div id="toast" class="toast" style="opacity:0"></div>
   </section>
@@ -199,7 +221,9 @@
       <div class="row"><label>Brennweite</label><input type="range" id="setLens" min="10" max="120" step="1"><output id="outLens"></output></div>
       <div class="row"><label>Foto-Modus</label>
         <div class="seg" id="segPhoto"><button data-v="VIEWPORT">Viewport</button><button data-v="RENDER">Render</button></div></div>
-      <div class="row" id="rowPassthrough"><label>Echte Kamera durchscheinen (AR)</label><input type="range" id="setPass" min="0" max="90" step="5"><output id="outPass"></output></div>
+      <div class="row" id="rowScale"><label>Weg-Faktor<br><span class="small" id="scaleInfo">Maßstab: wird gelernt</span></label><input type="range" id="setScale" min="-2" max="2" step="0.05"><output id="outScale"></output></div>
+      <div class="row" id="rowRelearn"><label>Tracking / Maßstab neu starten</label><button class="btn alt" id="btnRelearn" style="width:auto;margin:0;padding:9px 14px">Neu</button></div>
+      <div class="row" id="rowPassthrough"><label>Echte Kamera durchscheinen</label><input type="range" id="setPass" min="0" max="90" step="5"><output id="outPass"></output></div>
       <div class="row"><label>Video auch auf dem Handy speichern</label><input type="checkbox" id="setPhoneVideo" checked style="width:22px;height:22px;accent-color:var(--accent)"></div>
       <button class="btn" id="btnCloseSheet">Fertig</button>
     </div>
@@ -378,19 +402,24 @@ function screenAngle() {
   return typeof window.orientation === "number" ? window.orientation : 0;
 }
 function onOrientation(e) {
-  if (S.mode !== "gyro" || e.alpha == null) return;
+  if (e.alpha == null) return;
   // W3C: R = Rz(alpha) * Rx(beta) * Ry(gamma); device frame == Blender camera frame
   // (x right, y up, z out of the screen -> camera looks along -z out of the back).
   let q = qMul(qMul(qAxis(0, 0, 1, e.alpha * D2R), qAxis(1, 0, 0, e.beta * D2R)), qAxis(0, 1, 0, e.gamma * D2R));
   q = qMul(q, qAxis(0, 0, 1, -screenAngle() * D2R));
-  S.q = q; S.p = null;
+  S.qGyro = q;
+  if (S.mode === "gyro") { S.q = q; S.p = null; }
+  else if (S.mode === "cam") { S.q = q; }
 }
 
 async function requestMotionPermission() {
-  const DOE = window.DeviceOrientationEvent;
+  const DOE = window.DeviceOrientationEvent, DME = window.DeviceMotionEvent;
   if (DOE && typeof DOE.requestPermission === "function") {
     const r = await DOE.requestPermission();
     if (r !== "granted") throw new Error("Bewegungssensoren nicht erlaubt");
+  }
+  if (DME && typeof DME.requestPermission === "function") {
+    try { await DME.requestPermission(); } catch (e) {}
   }
 }
 
@@ -433,7 +462,198 @@ async function startXR() {
 }
 function applyPassthrough() {
   const v = Number($("setPass").value || 0);
-  canvas.style.opacity = S.xrSession ? String(1 - v / 100) : "1";
+  const mix = S.xrSession || S.mode === "cam";
+  canvas.style.opacity = mix ? String(1 - v / 100) : "1";
+  canvas.style.background = mix ? "transparent" : "#000";
+}
+
+
+// ---------------------------------------------------------------- camera tracking (visual SLAM, all phones)
+// AlvaAR (GPL-3.0, https://github.com/alanross/AlvaAR) runs monocular SLAM as WebAssembly.
+// Rotation comes from the gyro (smooth, gravity aligned); SLAM delivers the translation, which is
+// rotated into the gyro world frame. Metric scale is learned by comparing SLAM acceleration with the
+// accelerometer.
+const ALVA_URL = "https://cdn.jsdelivr.net/gh/alanross/AlvaAR@7796af500ee92001ac2a9888363ff64d7a3bee75/dist/alva_ar.js";
+const qConj = (q) => [q[0], -q[1], -q[2], -q[3]];
+const qRot = (q, v) => qMul(qMul(q, [0, v[0], v[1], v[2]]), qConj(q)).slice(1);
+function qSlerp(a, b, t) {
+  let d = a[0]*b[0] + a[1]*b[1] + a[2]*b[2] + a[3]*b[3];
+  if (d < 0) { b = b.map((v) => -v); d = -d; }
+  if (d > 0.9995) { const r = a.map((v, i) => v + (b[i] - v) * t); const n = Math.hypot(...r); return r.map((v) => v / n); }
+  const th = Math.acos(d), s = Math.sin(th), wa = Math.sin((1 - t) * th) / s, wb = Math.sin(t * th) / s;
+  return a.map((v, i) => v * wa + b[i] * wb);
+}
+function quatFromMat(te) { // column-major 4x4 -> [w,x,y,z] (same algorithm as three.js)
+  const m11 = te[0], m12 = te[4], m13 = te[8], m21 = te[1], m22 = te[5], m23 = te[9], m31 = te[2], m32 = te[6], m33 = te[10];
+  const tr = m11 + m22 + m33; let s;
+  if (tr > 0) { s = 0.5 / Math.sqrt(tr + 1); return [0.25 / s, (m32 - m23) * s, (m13 - m31) * s, (m21 - m12) * s]; }
+  if (m11 > m22 && m11 > m33) { s = 2 * Math.sqrt(1 + m11 - m22 - m33); return [(m32 - m23) / s, 0.25 * s, (m12 + m21) / s, (m13 + m31) / s]; }
+  if (m22 > m33) { s = 2 * Math.sqrt(1 + m22 - m11 - m33); return [(m13 - m31) / s, (m12 + m21) / s, 0.25 * s, (m23 + m32) / s]; }
+  s = 2 * Math.sqrt(1 + m33 - m11 - m22); return [(m21 - m12) / s, (m13 + m31) / s, (m23 + m32) / s, 0.25 * s];
+}
+
+const T = {
+  AlvaAR: null, alva: null, stream: null, running: false, cv: null, cx: null, w: 0, h: 0, vw: 0, vh: 0,
+  A: null, lost: true, prev: null, out: [0, 0, 0], hist: [], imu: [], lostSince: 0, frames: 0,
+  scale: null, num: 0, den: 0, samples: 0, factor: 1,
+};
+try { T.factor = Math.pow(10, +(store.get("pb_factor") || 0)); } catch (e) {}
+
+function onMotion(e) {
+  if (S.mode !== "cam" || !e.acceleration || e.acceleration.x == null || !S.qGyro) return;
+  const a = [e.acceleration.x, e.acceleration.y, e.acceleration.z];
+  T.imu.push({ t: performance.now(), a: qRot(S.qGyro, a) }); // world frame, gravity removed
+  if (T.imu.length > 400) T.imu.splice(0, T.imu.length - 400);
+}
+addEventListener("devicemotion", onMotion);
+
+function setTrk(state, text) {
+  const dot = $("trkDot");
+  dot.className = "dot " + ({ ok: "ok", init: "busy", lost: "warn", err: "err" }[state] || "");
+  $("trkText").textContent = text;
+}
+function showHint(title, text, progress) {
+  if (title == null) { $("trkHint").classList.add("hidden"); return; }
+  $("trkHint").classList.remove("hidden");
+  $("trkHintTitle").textContent = title; $("trkHintText").textContent = text || "";
+  $("trkHintBar").style.width = Math.round((progress || 0) * 100) + "%";
+}
+
+async function startCamTracking() {
+  setStatus("Lade Tracking-Engine (≈ 4 MB) …", "busy");
+  const camP = navigator.mediaDevices.getUserMedia({ audio: false, video: {
+    facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } } });
+  const [mod, stream] = await Promise.all([import(ALVA_URL), camP]);
+  T.AlvaAR = mod.AlvaAR; T.stream = stream;
+  const v = $("camVideo");
+  v.srcObject = stream; v.classList.remove("hidden");
+  await v.play();
+  await initAlva();
+  resetTracking();
+  T.running = true;
+  scheduleTrack();
+}
+async function initAlva() {
+  const v = $("camVideo");
+  const vw = v.videoWidth, vh = v.videoHeight, k = Math.min(1, 720 / Math.max(vw, vh)); // fewer pixels -> too few features for SLAM
+  T.w = Math.round(vw * k) & ~1; T.h = Math.round(vh * k) & ~1; T.vw = vw; T.vh = vh;
+  T.cv = document.createElement("canvas"); T.cv.width = T.w; T.cv.height = T.h;
+  T.cx = T.cv.getContext("2d", { willReadFrequently: true });
+  // Typical main camera: ~66° over the long side. AlvaAR expects the FOV of the short side.
+  const fov = 2 * Math.atan(Math.tan(33 * D2R) * Math.min(T.w, T.h) / Math.max(T.w, T.h)) / D2R;
+  T.alva = await T.AlvaAR.Initialize(T.w, T.h, fov);
+}
+function resetTracking(full = true) {
+  T.lost = true; T.prev = null; T.A = null; T.hist = []; T.lostSince = performance.now();
+  T.num = 0; T.den = 0; T.samples = 0;
+  if (full) { T.scale = null; if (T.alva) T.alva.reset(); }
+}
+function stopCamTracking() {
+  T.running = false;
+  if (T.stream) T.stream.getTracks().forEach((t) => t.stop());
+  T.stream = null;
+  $("camVideo").classList.add("hidden");
+  $("trkPill").classList.add("hidden");
+  showHint(null);
+}
+function scheduleTrack() {
+  if (!T.running) return;
+  const v = $("camVideo");
+  if (v.requestVideoFrameCallback) v.requestVideoFrameCallback((now, meta) => trackFrame(meta && meta.captureTime));
+  else setTimeout(() => trackFrame(), 33);
+}
+async function trackFrame(captureTime) {
+  if (!T.running) return;
+  try {
+    const v = $("camVideo");
+    if (v.videoWidth !== T.vw || v.videoHeight !== T.vh) { await initAlva(); resetTracking(); }
+    T.cx.drawImage(v, 0, 0, T.w, T.h);
+    const pose = T.alva.findCameraPose(T.cx.getImageData(0, 0, T.w, T.h));
+    const t = captureTime && captureTime > 0 && captureTime <= performance.now() ? captureTime : performance.now() - 40;
+    onSlamPose(pose, t);
+  } catch (e) { console.error(e); }
+  scheduleTrack();
+}
+
+function onSlamPose(pose, t) {
+  const now = performance.now();
+  if (!pose || !S.qGyro) {
+    if (!T.lost) { T.lost = true; T.lostSince = now; T.prev = null; T.hist = []; }
+    const long = now - T.lostSince > 6000;
+    setTrk(T.scale ? "lost" : "init", T.scale ? "Tracking verloren" : "Tracking startet");
+    showHint(T.scale ? "Tracking verloren" : "Tracking startet …",
+      long ? "Richte die Kamera auf eine Fläche mit Struktur (Möbel, Boden, Bücher) und bewege das Handy langsam seitlich."
+           : "Bewege das Handy langsam ein Stück zur Seite.", 0);
+    return;
+  }
+  // AlvaAR -> camera pose (y up, -z forward), see alva_ar_three.js
+  const r = quatFromMat(pose);
+  const qCam = [r[0], -r[1], r[2], r[3]];
+  const pCam = [pose[12], -pose[13], -pose[14]];
+  const aNew = qMul(S.qGyro, qConj(qCam)); // SLAM world -> gyro world
+  if (T.lost) {
+    T.A = aNew; T.lost = false; T.prev = null; T.num = 0; T.den = 0; T.samples = 0; // new map may have a new scale
+  } else {
+    T.A = qSlerp(T.A, aNew, 0.03);
+  }
+  const pw = qRot(T.A, pCam);
+  learnScale(pw, t);
+  if (T.prev && T.scale) {
+    const s = T.scale * T.factor;
+    let d = [pw[0] - T.prev[0], pw[1] - T.prev[1], pw[2] - T.prev[2]];
+    const len = Math.hypot(...d) * s;
+    if (len > 0.5) d = [0, 0, 0]; // jump after relocalisation -> ignore
+    for (let i = 0; i < 3; i++) T.out[i] += d[i] * s;
+  }
+  T.prev = pw;
+  S.p = T.out.map((v) => +v.toFixed(4));
+  if (T.scale) {
+    setTrk("ok", "Tracking aktiv");
+    showHint(null);
+  } else {
+    const prog = Math.min(1, T.samples / 60);
+    setTrk("init", "Maßstab lernen");
+    showHint("Fast fertig: Maßstab lernen", "Bewege das Handy ein paarmal zügig vor und zurück oder hoch und runter.", prog);
+  }
+}
+
+// Scale = |a_imu| / |a_slam|: least squares over windows with enough motion.
+function learnScale(pw, t) {
+  T.hist.push({ t, p: pw });
+  if (T.hist.length > 30) T.hist.shift();
+  const H = 0.15; // seconds between samples for the second difference
+  const n = T.hist.length;
+  if (n < 3) return;
+  const p2 = T.hist[n - 1];
+  let i1 = n - 2; while (i1 > 0 && (p2.t - T.hist[i1].t) < H * 1000) i1--;
+  const p1 = T.hist[i1];
+  let i0 = i1 - 1; while (i0 > 0 && (p1.t - T.hist[i0].t) < H * 1000) i0--;
+  if (i0 < 0 || i1 <= 0) return;
+  const p0 = T.hist[i0];
+  const h1 = (p1.t - p0.t) / 1000, h2 = (p2.t - p1.t) / 1000;
+  if (h1 < H * 0.8 || h2 < H * 0.8 || h1 > H * 2.5 || h2 > H * 2.5) return;
+  const aS = [0, 1, 2].map((k) => 2 * ((p2.p[k] - p1.p[k]) / h2 - (p1.p[k] - p0.p[k]) / h1) / (h1 + h2));
+  // triangular-weighted IMU average over [t0, t2] (what a second difference measures)
+  let wsum = 0; const aI = [0, 0, 0];
+  for (const s of T.imu) {
+    if (s.t < p0.t || s.t > p2.t) continue;
+    const w = s.t < p1.t ? (s.t - p0.t) / (p1.t - p0.t) : (p2.t - s.t) / (p2.t - p1.t);
+    if (w <= 0) continue;
+    wsum += w; for (let k = 0; k < 3; k++) aI[k] += s.a[k] * w;
+  }
+  if (wsum < 1) return;
+  for (let k = 0; k < 3; k++) aI[k] /= wsum;
+  const magI = Math.hypot(...aI);
+  if (magI < 0.6 || magI > 15) return; // need clear motion, ignore shocks
+  const forget = 0.985;
+  T.num = T.num * forget + (aI[0] * aS[0] + aI[1] * aS[1] + aI[2] * aS[2]);
+  T.den = T.den * forget + (aS[0] * aS[0] + aS[1] * aS[1] + aS[2] * aS[2]);
+  T.samples++;
+  if (T.samples >= (T.scale ? 20 : 60) && T.den > 0) {
+    const est = Math.abs(T.num) / T.den; // abs: some browsers report inverted accelerometer axes
+    if (isFinite(est) && est > 0) T.scale = T.scale ? T.scale + (est - T.scale) * 0.08 : est;
+    $("scaleInfo").textContent = "Maßstab: gelernt";
+  }
 }
 
 // ---------------------------------------------------------------- pose pump
@@ -571,7 +791,9 @@ function syncSettingsUI() {
   $("outLens").textContent = Math.round(S.lens) + " mm";
   $("outPass").textContent = $("setPass").value + " %";
   document.querySelectorAll("#segPhoto button").forEach((b) => b.classList.toggle("on", b.dataset.v === S.photoMode));
-  $("rowPassthrough").classList.toggle("hidden", !S.xrSession);
+  $("rowPassthrough").classList.toggle("hidden", !(S.xrSession || S.mode === "cam"));
+  $("rowScale").classList.toggle("hidden", S.mode !== "cam");
+  $("rowRelearn").classList.toggle("hidden", S.mode !== "cam");
   $("sheetInfo").textContent = m.scene ? `Szene „${m.scene}“ · Blender ${m.blender || ""} · ${host}` : host;
 }
 for (const [i, o, key, f] of fields) {
@@ -582,6 +804,14 @@ $("setLens").addEventListener("input", () => {
   S.lens = +$("setLens").value; $("outLens").textContent = S.lens + " mm"; send({ t: "lens", mm: S.lens });
 });
 $("setPass").value = 0;
+$("setScale").value = Math.log10(T.factor).toFixed(2);
+const fmtFactor = () => "× " + (T.factor >= 10 ? T.factor.toFixed(0) : T.factor.toFixed(2));
+$("outScale").textContent = fmtFactor();
+$("setScale").addEventListener("input", () => {
+  T.factor = Math.pow(10, +$("setScale").value); $("outScale").textContent = fmtFactor();
+  store.set("pb_factor", $("setScale").value);
+});
+$("btnRelearn").onclick = () => { resetTracking(true); $("scaleInfo").textContent = "Maßstab: wird gelernt"; $("sheet").classList.add("hidden"); };
 $("setPass").addEventListener("input", () => { $("outPass").textContent = $("setPass").value + " %"; applyPassthrough(); });
 document.querySelectorAll("#segPhoto button").forEach((b) => b.addEventListener("click", () => {
   S.photoMode = b.dataset.v; send({ t: "settings", photo: S.photoMode }); syncSettingsUI();
@@ -594,13 +824,16 @@ $("sheet").addEventListener("click", (e) => { if (e.target === $("sheet")) $("sh
 let wakeLock = null;
 async function keepAwake() { try { wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {} }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.open) keepAwake(); });
-function showHud() { $("start").classList.add("hidden"); $("hud").classList.remove("hidden"); $("hudMode").textContent = S.mode === "xr" ? "AR 6DoF" : "Gyro"; }
+function showHud() { $("start").classList.add("hidden"); $("hud").classList.remove("hidden"); $("hudMode").textContent = { xr: "AR (ARCore)", cam: "Kamera-Tracking", gyro: "Gyro" }[S.mode] || "Gyro";
+  $("trkPill").classList.toggle("hidden", S.mode !== "cam"); }
 function showStart() { $("hud").classList.add("hidden"); $("start").classList.remove("hidden"); }
 
 $("btnExit").onclick = () => {
   S.quitting = true;
   if (S.recording) stopRecording();
   if (S.xrSession) S.xrSession.end();
+  if (S.mode === "cam") stopCamTracking();
+  S.mode = "gyro";
   if (S.ws) S.ws.close();
   S.open = false;
   setStatus("Getrennt", "");
@@ -608,7 +841,8 @@ $("btnExit").onclick = () => {
   setTimeout(() => (S.quitting = false), 300);
 };
 
-async function begin(useXR) {
+async function begin(mode) {
+  const useXR = mode === "xr";
   if (!$("manual").classList.contains("hidden")) {
     host = $("hostIn").value.trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
     token = $("tokenIn").value.trim();
@@ -617,11 +851,21 @@ async function begin(useXR) {
   store.set("pb_host", host); store.set("pb_token", token);
   try {
     if (useXR) { S.mode = "xr"; await startXR(); }
-    else { await requestMotionPermission(); S.mode = "gyro"; }
+    else if (mode === "cam") {
+      await requestMotionPermission();
+      if (S.mode === "cam") stopCamTracking();
+      T.out = [0, 0, 0];
+      S.mode = "cam";
+      await startCamTracking();
+      applyPassthrough();
+    }
+    else { await requestMotionPermission(); if (S.mode === "cam") stopCamTracking(); S.mode = "gyro"; applyPassthrough(); }
   } catch (e) {
-    setStatus((useXR ? "AR konnte nicht starten: " : "") + e.message, "err");
+    const msg = e && e.name === "NotAllowedError" ? "Kamera-Zugriff wurde nicht erlaubt" : (e && e.message) || String(e);
+    setStatus((useXR ? "AR konnte nicht starten: " : mode === "cam" ? "Kamera-Tracking: " : "") + msg, "err");
+    if (S.mode === "cam") stopCamTracking();
     S.mode = "gyro";
-    if (useXR) return;
+    if (mode !== "gyro") return;
   }
   if (!useXR) {
     try { if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen(); } catch (e) {}
@@ -632,8 +876,10 @@ async function begin(useXR) {
   else connect();
 }
 addEventListener("deviceorientation", onOrientation);
-$("btnStart").onclick = () => begin(false);
-$("btnStartAR").onclick = () => begin(true);
+$("btnStart").onclick = () => begin("gyro");
+$("btnStartCam").onclick = () => begin("cam");
+$("btnStartAR").onclick = () => begin("xr");
+if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) $("btnStartCam").disabled = true;
 
 if (navigator.xr && navigator.xr.isSessionSupported) {
   navigator.xr.isSessionSupported("immersive-ar").then((ok) => { if (ok) $("btnStartAR").classList.remove("hidden"); }).catch(() => {});

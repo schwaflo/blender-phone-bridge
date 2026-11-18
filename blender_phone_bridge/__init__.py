@@ -8,7 +8,7 @@ sieh die Szene live auf dem Handy und nimm Fotos & Videos auf.
 bl_info = {
     "name": "Phone Bridge (Handy-Kamera)",
     "author": "schwaflo",
-    "version": (1, 0, 0),
+    "version": (1, 1, 0),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Seitenleiste (N) > Phone",
     "description": "Handy als virtuelle Kamera: Gyro/AR-Tracking, Live-Stream, Foto & Video",
@@ -65,6 +65,7 @@ class State:
     base_loc = Vector()
     p0 = Vector()
     smooth_q = None
+    smooth_loc = None
 
     # streaming
     want_frame = False
@@ -193,11 +194,13 @@ def recenter(cam):
     State.base_loc = cam.matrix_world.translation.copy()
     State.p0 = State.phone_p.copy() if State.phone_p is not None else Vector()
     State.smooth_q = None
+    State.smooth_loc = None
     State.need_recenter = False
 
 
 def rebase_position(cam):
     State.base_loc = cam.location.copy()
+    State.smooth_loc = None
     State.p0 = State.phone_p.copy() if State.phone_p is not None else Vector()
 
 
@@ -209,10 +212,10 @@ def apply_pose(cam, dt):
         recenter(cam)
 
     target = State.yaw_q @ State.phone_q
+    k = 1.0 - math.pow(s.smoothing, dt * 60.0) * 0.98 if s.smoothing > 0.0 else 1.0
     if State.smooth_q is None or s.smoothing <= 0.0:
         State.smooth_q = target
     else:
-        k = 1.0 - math.pow(s.smoothing, dt * 60.0) * 0.98
         State.smooth_q = State.smooth_q.slerp(target, min(1.0, max(0.02, k)))
 
     # Joystick movement (relative to viewing direction, horizontal)
@@ -231,6 +234,11 @@ def apply_pose(cam, dt):
     loc = State.base_loc.copy()
     if State.phone_p is not None:
         loc += State.yaw_q @ ((State.phone_p - State.p0) * s.position_scale)
+    if State.smooth_loc is None or s.smoothing <= 0.0 or (loc - State.smooth_loc).length > 2.0:
+        State.smooth_loc = loc
+    else:
+        State.smooth_loc = State.smooth_loc.lerp(loc, min(1.0, max(0.02, k)))
+    loc = State.smooth_loc.copy()
 
     if cam.rotation_mode != 'QUATERNION':
         cam.rotation_mode = 'QUATERNION'
@@ -798,8 +806,9 @@ class PhoneBridgeSettings(bpy.types.PropertyGroup):
     stream_fps: IntProperty(name="Max. FPS", default=30, min=1, max=60)
     move_speed: FloatProperty(name="Laufgeschwindigkeit", default=1.5, min=0.01, max=100, unit='VELOCITY',
                               description="Geschwindigkeit des Joysticks in m/s")
-    position_scale: FloatProperty(name="AR-Weg-Skalierung", default=1.0, min=0.01, max=1000,
-                                  description="1 m Bewegung des Handys = X m in Blender (nur AR/6DoF)")
+    position_scale: FloatProperty(name="Weg-Skalierung", default=1.0, min=0.01, max=1000,
+                                  description="1 m echte Bewegung = X m in Blender (Kamera-Tracking / AR). "
+                                              "Z.B. 10 um durch eine große Landschaft zu laufen")
     smoothing: FloatProperty(name="Glättung", default=0.35, min=0.0, max=0.95,
                              description="Glättet Zittern der Sensoren (0 = aus)")
     hide_overlays: BoolProperty(name="Overlays im Stream ausblenden", default=True)
@@ -931,7 +940,7 @@ class PHONEBRIDGE_PT_main(bpy.types.Panel):
         box = layout.box()
         if State.active_client:
             box.label(text="Verbunden: %s" % State.client_addr, icon='CHECKMARK')
-            mode = {"xr": "AR / 6DoF (Kamera-Tracking)", "gyro": "Gyrosensor"}.get(State.tracking_mode, "–")
+            mode = {"xr": "AR (ARCore, 6DoF)", "cam": "Kamera-Tracking (6DoF)", "gyro": "Gyrosensor"}.get(State.tracking_mode, "–")
             box.label(text="Tracking: %s" % mode, icon='ORIENTATION_GIMBAL')
             box.label(text="Stream: %.1f FPS" % State.fps, icon='VIEW_CAMERA')
             if State.recording:

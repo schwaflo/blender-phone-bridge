@@ -3,7 +3,8 @@
 Dein Handy als virtuelle Kamera für Blender:
 
 - **Umschauen per Gyrosensor**: Handy drehen → Blender-Kamera dreht sich mit
-- **AR-Tracking (6DoF)** über die Handykamera (WebXR/ARCore): Wenn du durch den Raum gehst, bewegt sich die Kamera in Blender mit
+- **Kamera-Tracking (6DoF) auf iPhone und Android**: Geh durch deinen Raum, und die Blender-Kamera läuft mit. Die Handykamera erkennt die Bewegung per visuellem SLAM ([AlvaAR](https://github.com/alanross/AlvaAR)). Der Maßstab in echten Metern wird automatisch über den Beschleunigungssensor gelernt.
+- **AR-Tracking (ARCore)** auf Android/Chrome als noch genauere Alternative
 - **Live-Bild** der Szene auf dem Handy-Display
 - **Joystick** zum Laufen, Regler für hoch/runter, Wischen zum Drehen, zwei Finger für Zoom
 - **Fotos** (schnell aus dem Viewport oder als echter Render) und **Videos**:
@@ -33,6 +34,9 @@ build.sh                baut dist/blender_phone_bridge.zip
    Eine andere Adresse kannst du in Blender unter *Einstellungen → Add-ons → Phone Bridge → GitHub-Pages-URL* eintragen.
 
 ### 2. Addon installieren
+
+Die fertige ZIP gibt es direkt auf der GitHub-Seite: **https://schwaflo.github.io/blender-phone-bridge/blender_phone_bridge.zip**
+(oder unter *Releases*). Selbst bauen geht mit:
 
 ```bash
 ./build.sh
@@ -76,7 +80,10 @@ Fotos und Videobilder landen in `//phone_captures/` neben der .blend-Datei. Ist 
 
 ## Hinweise & Grenzen
 
-- **AR-Tracking (6DoF)** gibt es nur auf Android mit Chrome und ARCore. iOS Safari unterstützt WebXR-AR nicht, dort steht Gyro + Joystick zur Verfügung.
+- **Kamera-Tracking:** Zum Start das Handy langsam seitlich bewegen, dann ein paarmal zügig vor und zurück, damit der Maßstab gelernt wird. Die Kamera braucht Struktur im Bild (Möbel, Boden, Bücher). Eine weiße Wand oder Dunkelheit funktioniert nicht. Die Tracking-Engine (ca. 4 MB) wird beim Start von jsDelivr geladen, dafür braucht das Handy Internet.
+- **Weg-Skalierung** (Blender-Seitenleiste) bzw. **Weg-Faktor** (Handy-Einstellungen): z.B. ×10, um mit einem echten Schritt 10 m durch eine große Szene zu gehen.
+- **AR-Tracking (ARCore)** erscheint nur auf Android-Geräten mit Chrome und ARCore-Unterstützung.
+- AlvaAR steht unter GPL-3.0 und wird zur Laufzeit vom CDN geladen, nicht mit diesem Projekt ausgeliefert.
 - Der Live-Stream nutzt die Shading-Einstellung des größten 3D-Viewports (Solid/Material Preview). Für flüssiges Streaming lieber nicht *Rendered* mit Cycles verwenden. Für schöne Bilder gibt es den Foto-Modus **Render**.
 - Ein 3D-Viewport muss sichtbar sein, damit gestreamt werden kann.
 - Ist der Port belegt, nimmt Blender automatisch den nächsten freien Port (8766, 8767, …).

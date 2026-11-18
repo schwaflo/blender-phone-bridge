@@ -8,4 +8,5 @@ mkdir -p blender_phone_bridge/web dist
 cp docs/index.html blender_phone_bridge/web/
 rm -f dist/blender_phone_bridge.zip
 zip -rq dist/blender_phone_bridge.zip blender_phone_bridge -x '*/__pycache__/*' '*.DS_Store'
-echo "Fertig: dist/blender_phone_bridge.zip"
+cp dist/blender_phone_bridge.zip docs/blender_phone_bridge.zip  # Download auf der GitHub-Seite
+echo "Fertig: dist/blender_phone_bridge.zip (+ docs/ für GitHub Pages)"
