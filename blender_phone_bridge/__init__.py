@@ -8,7 +8,7 @@ sieh die Szene live auf dem Handy und nimm Fotos & Videos auf.
 bl_info = {
     "name": "Phone Bridge (Handy-Kamera)",
     "author": "schwaflo",
-    "version": (1, 1, 0),
+    "version": (1, 2, 0),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Seitenleiste (N) > Phone",
     "description": "Handy als virtuelle Kamera: Gyro/AR-Tracking, Live-Stream, Foto & Video",
@@ -66,6 +66,8 @@ class State:
     p0 = Vector()
     smooth_q = None
     smooth_loc = None
+    step_remaining = 0.0    # metres still to walk from detected steps
+    diag = {}
 
     # streaming
     want_frame = False
@@ -231,6 +233,21 @@ def apply_pose(cam, dt):
         delta = (right * mx + fwd * my + Vector((0, 0, 1)) * mz) * s.move_speed * dt
         State.base_loc += delta
 
+    # Walking in place on the phone -> glide forward (horizontal viewing direction)
+    if State.step_remaining > 1e-4:
+        fwd = State.smooth_q @ Vector((0.0, 0.0, -1.0))
+        fwd.z = 0.0
+        if fwd.length < 1e-4:
+            fwd = State.smooth_q @ Vector((0.0, 1.0, 0.0))
+            fwd.z = 0.0
+        if fwd.length > 1e-4:
+            fwd.normalize()
+            dist = min(State.step_remaining, max(0.6, State.step_remaining * 3.0) * dt)
+            State.base_loc += fwd * dist
+            State.step_remaining -= dist
+        else:
+            State.step_remaining = 0.0
+
     loc = State.base_loc.copy()
     if State.phone_p is not None:
         loc += State.yaw_q @ ((State.phone_p - State.p0) * s.position_scale)
@@ -305,6 +322,13 @@ def handle_message(cid, kind, msg):
     elif t == "move":
         v = msg.get("v") or (0, 0, 0)
         State.move = tuple(max(-1.0, min(1.0, float(x))) for x in v[:3])
+    elif t == "step":
+        State.step_remaining = min(State.step_remaining + s.step_length * s.position_scale,
+                                   5.0 * s.step_length * s.position_scale)
+    elif t == "diag":
+        d = msg.get("d")
+        if isinstance(d, dict):
+            State.diag = d
     elif t == "yaw":
         State.yaw_q = Quaternion((0, 0, 1), float(msg.get("d", 0.0))) @ State.yaw_q
         rebase_position(cam)
@@ -809,6 +833,8 @@ class PhoneBridgeSettings(bpy.types.PropertyGroup):
     position_scale: FloatProperty(name="Weg-Skalierung", default=1.0, min=0.01, max=1000,
                                   description="1 m echte Bewegung = X m in Blender (Kamera-Tracking / AR). "
                                               "Z.B. 10 um durch eine große Landschaft zu laufen")
+    step_length: FloatProperty(name="Schrittlänge", default=0.7, min=0.05, max=10.0, unit='LENGTH',
+                               description="So weit bewegt dich ein Schritt beim Gehen auf der Stelle")
     smoothing: FloatProperty(name="Glättung", default=0.35, min=0.0, max=0.95,
                              description="Glättet Zittern der Sensoren (0 = aus)")
     hide_overlays: BoolProperty(name="Overlays im Stream ausblenden", default=True)
@@ -943,6 +969,18 @@ class PHONEBRIDGE_PT_main(bpy.types.Panel):
             mode = {"xr": "AR (ARCore, 6DoF)", "cam": "Kamera-Tracking (6DoF)", "gyro": "Gyrosensor"}.get(State.tracking_mode, "–")
             box.label(text="Tracking: %s" % mode, icon='ORIENTATION_GIMBAL')
             box.label(text="Stream: %.1f FPS" % State.fps, icon='VIEW_CAMERA')
+            d = State.diag
+            if d.get("mode") == "cam":
+                trk = {"ok": "aktiv", "lost": "verloren", "init": "startet"}.get(d.get("trk"), d.get("trk"))
+                box.label(text="Kamera: %s · %s fps · %s%% ok · %s Punkte" % (
+                    trk, d.get("fps"), d.get("ok"), d.get("pts")), icon='CON_CAMERASOLVER')
+                box.label(text="Maßstab: %s · IMU %s Hz" % (
+                    d.get("scale") if d.get("scale") else "geschätzt", d.get("imu")), icon='DRIVER_DISTANCE')
+            elif d:
+                box.label(text="IMU %s Hz · Schritte: %s" % (d.get("imu"), d.get("steps")), icon='MOD_DYNAMICPAINT')
+            if State.phone_p is not None:
+                pp = State.phone_p
+                box.label(text="Handy-Position: %.2f, %.2f, %.2f m" % (pp.x, pp.y, pp.z), icon='EMPTY_AXIS')
             if State.recording:
                 box.label(text="● Aufnahme läuft (%d)" % State.rec_count, icon='REC')
         else:
@@ -973,6 +1011,7 @@ class PHONEBRIDGE_PT_stream(bpy.types.Panel):
         col = self.layout.column()
         col.prop(s, "move_speed")
         col.prop(s, "position_scale")
+        col.prop(s, "step_length")
         col.prop(s, "smoothing", slider=True)
         col.separator()
         col.prop(s, "stream_resolution")

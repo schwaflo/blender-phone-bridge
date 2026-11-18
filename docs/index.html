@@ -224,7 +224,9 @@
       <div class="row" id="rowScale"><label>Weg-Faktor<br><span class="small" id="scaleInfo">Maßstab: wird gelernt</span></label><input type="range" id="setScale" min="-2" max="2" step="0.05"><output id="outScale"></output></div>
       <div class="row" id="rowRelearn"><label>Tracking / Maßstab neu starten</label><button class="btn alt" id="btnRelearn" style="width:auto;margin:0;padding:9px 14px">Neu</button></div>
       <div class="row" id="rowPassthrough"><label>Echte Kamera durchscheinen</label><input type="range" id="setPass" min="0" max="90" step="5"><output id="outPass"></output></div>
+      <div class="row"><label>Gehen auf der Stelle = vorwärts laufen<br><span class="small">Jeder Schritt bewegt dich in Blickrichtung (Gyro-Modus oder ohne Tracking)</span></label><input type="checkbox" id="setSteps" style="width:22px;height:22px;accent-color:var(--accent)"></div>
       <div class="row"><label>Video auch auf dem Handy speichern</label><input type="checkbox" id="setPhoneVideo" checked style="width:22px;height:22px;accent-color:var(--accent)"></div>
+      <div class="note" style="margin-top:12px"><b>Diagnose</b><br><span id="diagText">–</span></div>
       <button class="btn" id="btnCloseSheet">Fertig</button>
     </div>
   </section>
@@ -496,14 +498,41 @@ const T = {
   AlvaAR: null, alva: null, stream: null, running: false, cv: null, cx: null, w: 0, h: 0, vw: 0, vh: 0,
   A: null, lost: true, prev: null, out: [0, 0, 0], hist: [], imu: [], lostSince: 0, frames: 0,
   scale: null, num: 0, den: 0, samples: 0, factor: 1,
+  // diagnostics
+  trkFrames: 0, okFrames: 0, imuCount: 0, points: 0, state: "init", diag: {},
 };
+// Until the scale is learned we assume 1 SLAM unit ~ 1 m (monocular SLAM normalises its first map to
+// roughly the distance of the scene), so movement is visible immediately.
+const PROVISIONAL_SCALE = 1.0;
 try { T.factor = Math.pow(10, +(store.get("pb_factor") || 0)); } catch (e) {}
 
 function onMotion(e) {
-  if (S.mode !== "cam" || !e.acceleration || e.acceleration.x == null || !S.qGyro) return;
+  if (!S.qGyro) return;
+  T.imuCount++;
+  const g = e.accelerationIncludingGravity;
+  if (g && g.x != null) detectStep(g);
+  if (S.mode !== "cam" || !e.acceleration || e.acceleration.x == null) return;
   const a = [e.acceleration.x, e.acceleration.y, e.acceleration.z];
   T.imu.push({ t: performance.now(), a: qRot(S.qGyro, a) }); // world frame, gravity removed
   if (T.imu.length > 400) T.imu.splice(0, T.imu.length - 400);
+}
+
+// ---- walking in place: every step moves the camera forward (works on every phone)
+const STEP = { on: true, high: false, last: 0, lp: 9.81, count: 0 };
+try { STEP.on = store.get("pb_steps") !== "0"; } catch (e) {}
+function detectStep(g) {
+  if (!STEP.on || !S.open || (S.mode === "cam" && T.state === "ok") || S.mode === "xr") return;
+  // vertical (world z) component of the specific force; iOS reports it with opposite sign
+  const z = Math.abs(qRot(S.qGyro, [g.x, g.y, g.z])[2]);
+  STEP.lp += (z - STEP.lp) * 0.35;
+  const now = performance.now();
+  if (!STEP.high && STEP.lp > 10.9) {
+    STEP.high = true;
+    if (now - STEP.last > 300 && now - STEP.last < 2000) { send({ t: "step" }); STEP.count++; }
+    STEP.last = now;
+  } else if (STEP.high && STEP.lp < 9.6) {
+    STEP.high = false;
+  }
 }
 addEventListener("devicemotion", onMotion);
 
@@ -544,6 +573,7 @@ async function initAlva() {
   T.alva = await T.AlvaAR.Initialize(T.w, T.h, fov);
 }
 function resetTracking(full = true) {
+  T.everTracked = false; T.state = "init";
   T.lost = true; T.prev = null; T.A = null; T.hist = []; T.lostSince = performance.now();
   T.num = 0; T.den = 0; T.samples = 0;
   if (full) { T.scale = null; if (T.alva) T.alva.reset(); }
@@ -559,17 +589,19 @@ function stopCamTracking() {
 function scheduleTrack() {
   if (!T.running) return;
   const v = $("camVideo");
-  if (v.requestVideoFrameCallback) v.requestVideoFrameCallback((now, meta) => trackFrame(meta && meta.captureTime));
+  if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(() => trackFrame());
   else setTimeout(() => trackFrame(), 33);
 }
-async function trackFrame(captureTime) {
+async function trackFrame() {
   if (!T.running) return;
   try {
     const v = $("camVideo");
     if (v.videoWidth !== T.vw || v.videoHeight !== T.vh) { await initAlva(); resetTracking(); }
     T.cx.drawImage(v, 0, 0, T.w, T.h);
+    const t = performance.now() - 35; // approx. camera latency, same clock as the IMU samples
     const pose = T.alva.findCameraPose(T.cx.getImageData(0, 0, T.w, T.h));
-    const t = captureTime && captureTime > 0 && captureTime <= performance.now() ? captureTime : performance.now() - 40;
+    T.trkFrames++;
+    if (pose) T.okFrames++; else T.points = T.alva.getFramePoints().length;
     onSlamPose(pose, t);
   } catch (e) { console.error(e); }
   scheduleTrack();
@@ -578,10 +610,11 @@ async function trackFrame(captureTime) {
 function onSlamPose(pose, t) {
   const now = performance.now();
   if (!pose || !S.qGyro) {
-    if (!T.lost) { T.lost = true; T.lostSince = now; T.prev = null; T.hist = []; }
+    if (!T.lost) { T.lost = true; T.lostSince = now; } // keep T.prev/T.hist: the map survives short drop-outs
     const long = now - T.lostSince > 6000;
-    setTrk(T.scale ? "lost" : "init", T.scale ? "Tracking verloren" : "Tracking startet");
-    showHint(T.scale ? "Tracking verloren" : "Tracking startet …",
+    T.state = T.everTracked ? "lost" : "init";
+    setTrk(T.state, T.everTracked ? "Tracking verloren" : "Tracking startet");
+    showHint(T.everTracked ? "Tracking verloren" : "Tracking startet …",
       long ? "Richte die Kamera auf eine Fläche mit Struktur (Möbel, Boden, Bücher) und bewege das Handy langsam seitlich."
            : "Bewege das Handy langsam ein Stück zur Seite.", 0);
     return;
@@ -592,29 +625,27 @@ function onSlamPose(pose, t) {
   const pCam = [pose[12], -pose[13], -pose[14]];
   const aNew = qMul(S.qGyro, qConj(qCam)); // SLAM world -> gyro world
   if (T.lost) {
-    T.A = aNew; T.lost = false; T.prev = null; T.num = 0; T.den = 0; T.samples = 0; // new map may have a new scale
+    if (!T.A || now - T.lostSince > 1500) T.A = aNew; // long gap: re-align, short gap: keep alignment
+    T.lost = false;
+    if (now - T.lostSince > 1500) T.hist = [];
+    if (now - T.lostSince > 5000) T.prev = null;      // probably a new map -> don't bridge
   } else {
     T.A = qSlerp(T.A, aNew, 0.03);
   }
   const pw = qRot(T.A, pCam);
   learnScale(pw, t);
-  if (T.prev && T.scale) {
-    const s = T.scale * T.factor;
+  if (T.prev) {
+    const s = (T.scale || PROVISIONAL_SCALE) * T.factor;
     let d = [pw[0] - T.prev[0], pw[1] - T.prev[1], pw[2] - T.prev[2]];
-    const len = Math.hypot(...d) * s;
-    if (len > 0.5) d = [0, 0, 0]; // jump after relocalisation -> ignore
+    if (Math.hypot(...d) > 0.3) d = [0, 0, 0]; // jump after relocalisation (SLAM units) -> ignore
     for (let i = 0; i < 3; i++) T.out[i] += d[i] * s;
   }
   T.prev = pw;
+  T.everTracked = true;
+  T.state = "ok";
   S.p = T.out.map((v) => +v.toFixed(4));
-  if (T.scale) {
-    setTrk("ok", "Tracking aktiv");
-    showHint(null);
-  } else {
-    const prog = Math.min(1, T.samples / 60);
-    setTrk("init", "Maßstab lernen");
-    showHint("Fast fertig: Maßstab lernen", "Bewege das Handy ein paarmal zügig vor und zurück oder hoch und runter.", prog);
-  }
+  setTrk("ok", T.scale ? "Tracking aktiv" : "Tracking aktiv · Maßstab geschätzt");
+  showHint(null);
 }
 
 // Scale = |a_imu| / |a_slam|: least squares over windows with enough motion.
@@ -644,17 +675,38 @@ function learnScale(pw, t) {
   if (wsum < 1) return;
   for (let k = 0; k < 3; k++) aI[k] /= wsum;
   const magI = Math.hypot(...aI);
-  if (magI < 0.6 || magI > 15) return; // need clear motion, ignore shocks
+  if (magI < 0.4 || magI > 15) return; // need clear motion, ignore shocks
   const forget = 0.985;
   T.num = T.num * forget + (aI[0] * aS[0] + aI[1] * aS[1] + aI[2] * aS[2]);
   T.den = T.den * forget + (aS[0] * aS[0] + aS[1] * aS[1] + aS[2] * aS[2]);
   T.samples++;
-  if (T.samples >= (T.scale ? 20 : 60) && T.den > 0) {
+  if (T.samples >= 40 && T.den > 0) {
     const est = Math.abs(T.num) / T.den; // abs: some browsers report inverted accelerometer axes
     if (isFinite(est) && est > 0) T.scale = T.scale ? T.scale + (est - T.scale) * 0.08 : est;
     $("scaleInfo").textContent = "Maßstab: gelernt";
   }
 }
+
+// ---------------------------------------------------------------- diagnostics
+let diagT = performance.now();
+setInterval(() => {
+  const now = performance.now(), dt = (now - diagT) / 1000; diagT = now;
+  const d = {
+    mode: S.mode,
+    trk: S.mode === "cam" ? T.state : "-",
+    fps: Math.round(T.trkFrames / dt), ok: Math.round(100 * T.okFrames / Math.max(1, T.trkFrames)),
+    imu: Math.round(T.imuCount / dt), pts: T.points,
+    scale: T.scale ? +T.scale.toFixed(2) : null, learn: T.samples, steps: STEP.count,
+    pos: S.p ? S.p.map((v) => +v.toFixed(2)) : null,
+  };
+  T.trkFrames = 0; T.okFrames = 0; T.imuCount = 0;
+  T.diag = d;
+  if (S.open) send({ t: "diag", d });
+  const el = $("diagText");
+  if (el) el.textContent = S.mode === "cam"
+    ? `Tracking ${d.trk} · ${d.fps} fps (${d.ok}% ok) · Punkte ${d.pts} · IMU ${d.imu} Hz · Maßstab ${d.scale ?? "geschätzt"} (${d.learn}) · Pos ${d.pos ? d.pos.join(", ") : "–"}`
+    : `Modus ${d.mode} · IMU ${d.imu} Hz · Schritte ${d.steps}`;
+}, 1000);
 
 // ---------------------------------------------------------------- pose pump
 function pumpPose(force) {
@@ -811,6 +863,8 @@ $("setScale").addEventListener("input", () => {
   T.factor = Math.pow(10, +$("setScale").value); $("outScale").textContent = fmtFactor();
   store.set("pb_factor", $("setScale").value);
 });
+$("setSteps").checked = STEP.on;
+$("setSteps").addEventListener("change", () => { STEP.on = $("setSteps").checked; store.set("pb_steps", STEP.on ? "1" : "0"); });
 $("btnRelearn").onclick = () => { resetTracking(true); $("scaleInfo").textContent = "Maßstab: wird gelernt"; $("sheet").classList.add("hidden"); };
 $("setPass").addEventListener("input", () => { $("outPass").textContent = $("setPass").value + " %"; applyPassthrough(); });
 document.querySelectorAll("#segPhoto button").forEach((b) => b.addEventListener("click", () => {
