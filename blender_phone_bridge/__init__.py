@@ -8,7 +8,7 @@ sieh die Szene live auf dem Handy und nimm Fotos & Videos auf.
 bl_info = {
     "name": "Phone Bridge (Handy-Kamera)",
     "author": "schwaflo",
-    "version": (1, 2, 0),
+    "version": (1, 3, 0),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Seitenleiste (N) > Phone",
     "description": "Handy als virtuelle Kamera: Gyro/AR-Tracking, Live-Stream, Foto & Video",
@@ -972,10 +972,12 @@ class PHONEBRIDGE_PT_main(bpy.types.Panel):
             d = State.diag
             if d.get("mode") == "cam":
                 trk = {"ok": "aktiv", "lost": "verloren", "init": "startet"}.get(d.get("trk"), d.get("trk"))
-                box.label(text="Kamera: %s · %s fps · %s%% ok · %s Punkte" % (
-                    trk, d.get("fps"), d.get("ok"), d.get("pts")), icon='CON_CAMERASOLVER')
-                box.label(text="Maßstab: %s · IMU %s Hz" % (
-                    d.get("scale") if d.get("scale") else "geschätzt", d.get("imu")), icon='DRIVER_DISTANCE')
+                box.label(text="%s: %s · %s fps · %s%% ok" % (
+                    d.get("engine", "Kamera"), trk, d.get("fps"), d.get("ok")), icon='CON_CAMERASOLVER')
+                if d.get("st"):
+                    box.label(text="Status: %s" % d.get("st"), icon='INFO')
+                scale = "Meter (absolut)" if d.get("engine") == "8th Wall" else (d.get("scale") or "geschätzt")
+                box.label(text="Maßstab: %s · IMU %s Hz" % (scale, d.get("imu")), icon='DRIVER_DISTANCE')
             elif d:
                 box.label(text="IMU %s Hz · Schritte: %s" % (d.get("imu"), d.get("steps")), icon='MOD_DYNAMICPAINT')
             if State.phone_p is not None:

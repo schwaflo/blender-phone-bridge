@@ -3,7 +3,8 @@
 Dein Handy als virtuelle Kamera für Blender:
 
 - **Umschauen per Gyrosensor**: Handy drehen → Blender-Kamera dreht sich mit
-- **Kamera-Tracking (6DoF) auf iPhone und Android**: Geh durch deinen Raum, und die Blender-Kamera läuft mit. Die Handykamera erkennt die Bewegung per visuellem SLAM ([AlvaAR](https://github.com/alanross/AlvaAR)). Der Maßstab in echten Metern wird automatisch über den Beschleunigungssensor gelernt.
+- **Kamera-Tracking (6DoF) auf iPhone und Android**: Geh durch deinen Raum, und die Blender-Kamera läuft mit, in echten Metern. Dafür nutzt die App die [8th-Wall-Engine](https://8thwall.org) von Niantic Spatial (visuell-inertiales SLAM im Browser). Startet sie auf einem Gerät nicht, übernimmt [AlvaAR](https://github.com/alanross/AlvaAR) als Ersatz.
+- **Gehen auf der Stelle**: Jeder Schritt bringt dich in Blickrichtung vorwärts, auch ohne Kamera-Tracking
 - **AR-Tracking (ARCore)** auf Android/Chrome als noch genauere Alternative
 - **Live-Bild** der Szene auf dem Handy-Display
 - **Joystick** zum Laufen, Regler für hoch/runter, Wischen zum Drehen, zwei Finger für Zoom
@@ -80,10 +81,22 @@ Fotos und Videobilder landen in `//phone_captures/` neben der .blend-Datei. Ist 
 
 ## Hinweise & Grenzen
 
-- **Kamera-Tracking:** Zum Start das Handy langsam seitlich bewegen, dann ein paarmal zügig vor und zurück, damit der Maßstab gelernt wird. Die Kamera braucht Struktur im Bild (Möbel, Boden, Bücher). Eine weiße Wand oder Dunkelheit funktioniert nicht. Die Tracking-Engine (ca. 4 MB) wird beim Start von jsDelivr geladen, dafür braucht das Handy Internet.
+- **Kamera-Tracking:** Zum Start das Handy langsam seitlich bewegen. Die Kamera braucht Struktur im Bild (Möbel, Boden, Bücher); eine weiße Wand oder Dunkelheit funktioniert nicht. Die Tracking-Engine (ca. 7 MB) wird beim ersten Start von jsDelivr geladen und danach aus dem Cache genommen.
 - **Weg-Skalierung** (Blender-Seitenleiste) bzw. **Weg-Faktor** (Handy-Einstellungen): z.B. ×10, um mit einem echten Schritt 10 m durch eine große Szene zu gehen.
 - **AR-Tracking (ARCore)** erscheint nur auf Android-Geräten mit Chrome und ARCore-Unterstützung.
 - AlvaAR steht unter GPL-3.0 und wird zur Laufzeit vom CDN geladen, nicht mit diesem Projekt ausgeliefert.
+- Die 8th-Wall-Engine steht unter der [XR Engine License](https://8thwall.org/docs/engine/license) von Niantic Spatial (kostenlos, auch für Hobbyprojekte; nicht als Kern eines kostenpflichtigen Produkts) und wird zur Laufzeit vom CDN geladen.
+- **Diagnose:** Handy-Einstellungen → „Diagnose“ bzw. Blender-Seitenleiste zeigen Engine, Tracking-Zustand, Bildrate und Position.
+
+## Welche Tracking-Technik wofür?
+
+| Technik | Genauigkeit | Geräte | Hinweis |
+|---|---|---|---|
+| 8th Wall (Standard) | gut, echte Meter | iPhone & Android, Browser | keine Installation |
+| ARCore (WebXR) | sehr gut | Android mit ARCore | Button erscheint nur dort |
+| Gehen auf der Stelle | grob (Schritte) | alle | ohne Kamera |
+| ARKit + LiDAR | am besten | iPhone (Pro mit LiDAR) | nur mit eigener nativer App möglich, nicht im Browser |
+| GPS | 3–10 m | alle, nur draußen | für Raum-Tracking ungeeignet |
 - Der Live-Stream nutzt die Shading-Einstellung des größten 3D-Viewports (Solid/Material Preview). Für flüssiges Streaming lieber nicht *Rendered* mit Cycles verwenden. Für schöne Bilder gibt es den Foto-Modus **Render**.
 - Ein 3D-Viewport muss sichtbar sein, damit gestreamt werden kann.
 - Ist der Port belegt, nimmt Blender automatisch den nächsten freien Port (8766, 8767, …).
